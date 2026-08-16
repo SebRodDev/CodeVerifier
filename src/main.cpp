@@ -31,9 +31,9 @@ int main(int argc, char* argv[]) {
 
     Scheduler::Config config;
     std::string directoryRoot = argv[1];
-    config.amountThreads = std::stoi(argv[2]);
-    config.maxRetries = std::stoi(argv[3]);
-    //config.maxTimeout = std::chrono::milliseconds(std::stoi(argv[4]));
+    if (argc >= 3) config.amountThreads = std::stoi(argv[2]);
+    if (argc >= 4) config.maxRetries = std::stoi(argv[3]);
+    if (argc >= 5) config.maxTimeout = std::chrono::milliseconds(std::stoi(argv[4]));
 
     std::vector <std::string> allFiles = collectAllFiles(directoryRoot);
     std::cout << "Found " << allFiles.size() << " C++ files under " << directoryRoot << "\n";

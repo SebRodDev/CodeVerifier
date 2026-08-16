@@ -14,7 +14,7 @@ public:
         int exitCode;
     };
 
-    ProcessResult run(const std::vector<std::string>& arguments, std::chrono::milliseconds timeout);
+    static ProcessResult run(const std::vector<std::string>& arguments, std::chrono::milliseconds timeout);
 private:
-    std::vector<char*> stringToC(const std::vector<std::string>& arguments);
+    static std::vector<char*> stringToC(const std::vector<std::string>& arguments);
 };

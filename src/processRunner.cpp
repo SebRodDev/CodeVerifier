@@ -1,12 +1,15 @@
-#include "ProcessRunner.hpp"
+#include "processRunner.hpp"
 
 #include <unistd.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <cstring>
 #include <cerrno>
 #include <array>
 #include <thread>
+
+#include <iostream>
 
 std::vector<char*> ProcessRunner::stringToC(const std::vector<std::string>& arguments) {
     // since execvp take in a character array
@@ -21,8 +24,11 @@ std::vector<char*> ProcessRunner::stringToC(const std::vector<std::string>& argu
     return cArguments;
 }
 
-ProcessResult ProcessRunner::run(const std::vector<std::string>& arguments, std::chrono::milliseconds timeout) {
+ProcessRunner::ProcessResult ProcessRunner::run(const std::vector<std::string>& arguments, std::chrono::milliseconds timeout) {
     // create a process and then execute it
+    if (arguments.empty()) {
+        return {JobStatus::Crash, "No command provided", -1};
+    }
 
     int outputPipe[2];
 
@@ -49,8 +55,8 @@ ProcessResult ProcessRunner::run(const std::vector<std::string>& arguments, std:
         auto cArgumentVersion = stringToC(arguments);
         execvp(cArgumentVersion[0], cArgumentVersion.data());
 
-        // Execvp only fails if the code failed
-        exit(-1);
+        // execvp only returns on failure; stderr is redirected to the parent pipe.
+        _exit(127);
     }
 
     // mark the read end in the parent as finished
@@ -61,7 +67,7 @@ ProcessResult ProcessRunner::run(const std::vector<std::string>& arguments, std:
     int flags = fcntl(outputPipe[0], F_GETFL, 0);
     fcntl(outputPipe[0], F_SETFL, flags | O_NONBLOCK);
 
-    std::string output;
+    std::string output = "";
     auto timeoutExceeded = std::chrono::steady_clock::now() + timeout;
     bool timeOut = false;
     int status = 0;
@@ -88,6 +94,8 @@ ProcessResult ProcessRunner::run(const std::vector<std::string>& arguments, std:
             waitpid(pid, &status, 0);
             break;
         }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
     // close the read pipe
@@ -108,5 +116,9 @@ ProcessResult ProcessRunner::run(const std::vector<std::string>& arguments, std:
         return {JobStatus::ExecutionError, "Code experienced an error when running: " + output, exitCode};
     }
 
-    return {JobStatus::Success, "Code ran successfully: " + output, exitCode};
+    if (exitCode == 0 && output.empty()) {
+        return {JobStatus::Success, "Code ran successfully with no output", exitCode};
+    }
+
+    return {JobStatus::LinterError, "Code has potential vulnerabilities that need to be fixed:\n " + output, exitCode};
 }

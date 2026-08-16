@@ -1,30 +1,11 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <iostream>
+#include <cstdlib>
 
 #include "Scheduler.hpp"
 #include "processRunner.hpp"
-
-static bool isCppFile(const std::filesystem::path& p) {
-    // ensure that the files inside are actually cpp related files as this current version of the product only works with cpp files
-    static const std::vector<std::string> exts = {".cpp", ".cc", ".cxx", ".h", ".hpp"};
-    for (const auto& e : exts) {
-        if (p.extension() == e) return true;
-    }
-    return false;
-}
-
-static std::vector<std::string> collectAllFiles(const std::string& root) {
-    // recursively iterate through all of the files and after ensuring they are a cpp file then they are added to our list of files 
-    std::vector<std::string> foundFiles;
-    for (const auto& potentialFile : std::filesystem::recursive_directory_iterator(root)) {
-        if (potentialFile.is_regular_file() && isCppFile(potentialFile)) {
-            foundFiles.push_back(potentialFile.path().string());
-        }
-    }
-
-    return files;
-}
 
 static std::string statusMessage(JobStatus status) {
     switch (status) {
@@ -36,7 +17,101 @@ static std::string statusMessage(JobStatus status) {
         return "Timeout";
     case JobStatus::ExecutionError:
         return "Execution Error";
+    case JobStatus::LinterError:
+        return "Linter Error";
     }
 
     return "UNKNOWN STATUS";
+}
+
+std::vector<singleFileJobResult> Scheduler::run(const std::vector<std::string>& filePaths) {
+    if (filePaths.empty()) {
+        return {};
+    }
+
+    totalJobs.store(filePaths.size());
+    completedJobs.store(0);
+
+    for (const auto& path : filePaths) {
+        queue.push(singleFileJob(path));
+    }
+
+    std::vector<std::thread> threads(config.amountThreads);;
+
+    for (int i = 0; i < config.amountThreads; i++) {
+        threads[i] = std::thread(&Scheduler::threadLoop, this);
+    }
+
+    for (auto& thread : threads) {
+        thread.join();
+    }
+
+    // waiting until all threads are done and then returning the results
+    std::lock_guard<std::mutex> lock(resultsMutex);
+    return results;
+}
+
+void Scheduler::threadLoop() {
+    ProcessRunner processRunner;
+
+    while (true) {
+        std::optional<singleFileJob> jobOpt = queue.pop();
+        if (!jobOpt.has_value()) {
+            return;
+        }
+
+        singleFileJob job = jobOpt.value();
+        // mark that we are on a new attempt
+        job.currentAttempt++;
+
+        std::vector<std::string> arguments = {
+            "clang-tidy",
+            "-checks=clang-analyzer-*",
+            job.filePath,
+            "--",
+            "-std=c++17"
+        };
+
+        // required in order to run clang-tidy
+        if (const char* sdkRoot = std::getenv("SDKROOT"); sdkRoot != nullptr && *sdkRoot != '\0') {
+            arguments.emplace_back("-isysroot");
+            arguments.emplace_back(sdkRoot);
+        }
+
+        ProcessRunner::ProcessResult result = ProcessRunner::run(arguments, config.maxTimeout);
+
+        bool shouldRetry = (result.jobStatus == JobStatus::Timeout || result.jobStatus == JobStatus::Crash);
+
+        // if we experienced a crash or timed out we should retry to see if it was something actually
+        // wrong with the code or not
+        if (shouldRetry && job.currentAttempt < config.maxRetries) {
+            std::cerr << "[retry] " << job.filePath
+                << " attempt " << job.currentAttempt
+                << " failed (" << static_cast<int>(result.jobStatus)
+                << "), requeuing\n";
+
+            queue.push(job);
+            continue;
+        }
+
+        // we've reached a point where we are done so lock it and add the result to the vector
+        {
+            std::cout << "[result] " << job.filePath
+                << " attempt " << job.currentAttempt
+                << " finished with status: " << statusMessage(result.jobStatus) << " Error Code: " << result.exitCode
+                << "\n";
+
+            if (result.jobStatus == JobStatus::Success) {
+                result.output = "Code ran successfully with no output";
+            }
+
+            std::lock_guard<std::mutex> lock(resultsMutex);
+            results.push_back({job, result.jobStatus, result.output, result.exitCode});
+        }
+
+        const size_t finished = completedJobs.fetch_add(1) + 1;
+        if (finished >= totalJobs.load()) {
+            queue.shutdown();
+        }
+    }
 }

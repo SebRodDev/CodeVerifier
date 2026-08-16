@@ -8,6 +8,8 @@ find_package(Threads REQUIRED)
 
 add_executable(codeDebugger
     src/processRunner.cpp
+    src/Scheduler.cpp
+    src/main.cpp
 )
 
 target_include_directories(codeDebugger PRIVATE include)

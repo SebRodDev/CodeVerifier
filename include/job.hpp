@@ -23,7 +23,8 @@ enum class JobStatus {
     Success,
     Timeout,
     Crash,
-    ExecutionError // happens when the code that was just executed returns an error from a function or something
+    ExecutionError, // happens when the code that was just executed returns an error from a function or something
+    LinterError
 };
 
 struct singleFileJobResult {

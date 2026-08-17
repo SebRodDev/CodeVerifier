@@ -53,6 +53,7 @@ int main(int argc, char* argv[]) {
         std::cout << "File: " << result.job.filePath
             << " | Status: " << static_cast<int>(result.operationStatus)
             << " | Exit Code: " << result.codeExitStatus
+            //<< " | Findings: " << result.findings.size()
             << "\nDebug Output:\n" << result.debugOutput
             << "\n-----------------------------\n";
     }

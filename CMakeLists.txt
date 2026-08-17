@@ -14,3 +14,14 @@ add_executable(codeDebugger
 
 target_include_directories(codeDebugger PRIVATE include)
 target_link_libraries(codeDebugger PRIVATE Threads::Threads)
+
+include(FetchContent)
+
+FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3   # pin a specific version — don't float on a branch
+)
+FetchContent_MakeAvailable(json)
+
+target_link_libraries(codeDebugger PRIVATE nlohmann_json::nlohmann_json)

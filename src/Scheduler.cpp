@@ -3,9 +3,43 @@
 #include <vector>
 #include <iostream>
 #include <cstdlib>
+#include <regex>
+#include <sstream>
+#include <utility>
 
 #include "Scheduler.hpp"
 #include "processRunner.hpp"
+
+static std::vector<Finding> parseClangTidyFindings(const std::string& output) {
+    std::vector<Finding> findings;
+    std::istringstream stream(output);
+    std::string line;
+
+    // Typical format:
+    // /path/file.cpp:12:8: warning: message text [check-name]
+    static const std::regex findingPattern(
+        R"(^(.+?):([0-9]+):([0-9]+):\s+(warning|error|note):\s+(.*?)(?:\s+\[([^\]]+)\])?$)"
+    );
+
+    while (std::getline(stream, line)) {
+        std::smatch match;
+        if (!std::regex_match(line, match, findingPattern)) {
+            continue;
+        }
+
+        Finding finding;
+        finding.filePath = match[1].str();
+        finding.line = std::stoi(match[2].str());
+        finding.column = std::stoi(match[3].str());
+        finding.severity = match[4].str();
+        finding.message = match[5].str();
+        finding.checkName = match[6].matched ? match[6].str() : "";
+        finding.rawLine = line;
+        findings.push_back(std::move(finding));
+    }
+
+    return findings;
+}
 
 static std::string statusMessage(JobStatus status) {
     switch (status) {
@@ -79,6 +113,11 @@ void Scheduler::threadLoop() {
         }
 
         ProcessRunner::ProcessResult result = ProcessRunner::run(arguments, config.maxTimeout);
+        std::vector<Finding> findings = parseClangTidyFindings(result.output);
+
+        if (result.jobStatus == JobStatus::ExecutionError && !findings.empty()) {
+            result.jobStatus = JobStatus::LinterError;
+        }
 
         bool shouldRetry = (result.jobStatus == JobStatus::Timeout || result.jobStatus == JobStatus::Crash);
 
@@ -106,7 +145,7 @@ void Scheduler::threadLoop() {
             }
 
             std::lock_guard<std::mutex> lock(resultsMutex);
-            results.push_back({job, result.jobStatus, result.output, result.exitCode});
+            results.push_back({job, result.jobStatus, result.output, result.exitCode, findings});
         }
 
         const size_t finished = completedJobs.fetch_add(1) + 1;

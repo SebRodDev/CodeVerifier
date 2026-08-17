@@ -135,10 +135,10 @@ void Scheduler::threadLoop() {
 
         // we've reached a point where we are done so lock it and add the result to the vector
         {
-            std::cout << "[result] " << job.filePath
-                << " attempt " << job.currentAttempt
-                << " finished with status: " << statusMessage(result.jobStatus) << " Error Code: " << result.exitCode
-                << "\n";
+            //std::cout << "[result] " << job.filePath
+            //    << " attempt " << job.currentAttempt
+            //    << " finished with status: " << statusMessage(result.jobStatus) << " Error Code: " << result.exitCode
+            //    << "\n";
 
             if (result.jobStatus == JobStatus::Success) {
                 result.output = "Code ran successfully with no output";

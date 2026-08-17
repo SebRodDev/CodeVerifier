@@ -1,6 +1,10 @@
 #include <iostream>
 #include <filesystem>
+#include <fstream>
 #include "Scheduler.hpp"
+#include "LlmApi.hpp"
+#include "LlmReview.hpp"
+
 
 bool isCppFile(const std::filesystem::path& p) {
     // ensure that the files inside are actually cpp related files as this current version of the product only works with cpp files
@@ -21,6 +25,19 @@ std::vector<std::string> collectAllFiles(const std::string& root) {
     }
 
     return foundFiles;
+}
+
+// Reads the entire content of a file into a string so that it can be inputted into the LLM to review the code
+std::string readFileContent(const std::string& filePath) {
+    std::ifstream codeFile(filePath);
+
+    if (!codeFile.is_open()) {
+        throw std::runtime_error("Could not open file: " + filePath);
+    }
+
+    std::string content((std::istreambuf_iterator<char>(codeFile)), std::istreambuf_iterator<char>());
+
+    return content;
 }
 
 int main(int argc, char* argv[]) {
@@ -56,5 +73,33 @@ int main(int argc, char* argv[]) {
             //<< " | Findings: " << result.findings.size()
             << "\nDebug Output:\n" << result.debugOutput
             << "\n-----------------------------\n";
+        for (const auto& finding : result.findings) {
+            LlmReviewInput input;
+            input.finding = finding;
+            input.localSnippet = finding.rawLine;  // TODO: real surrounding-lines snippet later
+            input.fileContent = readFileContent(finding.filePath);                // TODO: read the actual file content later
+
+            std::string prompt = LlmReview::buildPrompt(input);
+            LlmApiResult apiResult = LlmApi::callGemini(prompt);
+
+            if (!apiResult.success) {
+                std::cout << "  [LLM ERROR] " << finding.filePath << ":" << finding.line
+                    << " -> " << apiResult.errorMessage << "\n";
+                continue;
+            }
+
+            bool extracted = false;
+            std::string verdictText = LlmApi::extractGeminiText(apiResult.body, extracted);
+            if (!extracted) {
+                std::cout << "  [ENVELOPE ERROR] " << verdictText << "\n";
+                continue;
+            }
+
+            LlmVerdict verdict = LlmReview::parseVerdictJson(verdictText);
+            std::cout << "  [" << finding.filePath << ":" << finding.line << "] "
+                << "decision=" << static_cast<int>(verdict.decision)
+                << " confidence=" << verdict.confidence
+                << "\n    reasoning: " << verdict.reasoning << "\n";
+        }
     }
 }
